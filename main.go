@@ -1,11 +1,18 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
+
+type PayloadStruct struct {
+	Query string `json:"query"`
+}
 
 type ResponseStruct struct {
 	Data struct {
@@ -15,44 +22,104 @@ type ResponseStruct struct {
 	} `json:"data"`
 }
 
-type Payload struct {
-	Query string `json:"query"`
+// Call represents an active request
+type Call struct {
+	Req   PayloadStruct
+	Res   ResponseStruct
+	Done  chan bool
+	Error error
+}
+
+func NewCall(req PayloadStruct) *Call {
+	done := make(chan bool)
+	return &Call{
+		Req:  req,
+		Done: done,
+	}
+}
+
+type WSClient struct {
+	conn *websocket.Conn
+}
+
+func New() *WSClient {
+	return &WSClient{}
+}
+
+func (c *WSClient) read() {
+	for {
+		var res ResponseStruct
+		err := c.conn.ReadJSON(&res)
+		log.Printf("Receive : %v", res)
+		if err != nil {
+			log.Printf("error : %v", err)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
+				log.Printf("error : %v", err)
+			}
+			break
+		}
+	}
+}
+
+func (c *WSClient) Connect(url string) error {
+	conn, _, err := websocket.DefaultDialer.Dial(url, http.Header{
+		"User-Agent": []string{"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36"},
+	})
+	if err != nil {
+		return err
+	}
+	c.conn = conn
+	go c.read()
+	return nil
+}
+
+func (c *WSClient) Request(payload interface{}) (interface{}, error) {
+
+	req := payload.(PayloadStruct)
+	call := NewCall(req)
+
+	err := c.conn.WriteJSON(&req)
+	if err != nil {
+		return nil, err
+	}
+
+	select {
+	case <-call.Done:
+	case <-time.After(2 * time.Second):
+		call.Error = errors.New("request timeout")
+	}
+
+	if call.Error != nil {
+		return nil, call.Error
+	}
+	return call.Res.Data, nil
+}
+
+func (c *WSClient) Close() error {
+	return c.conn.Close()
 }
 
 func main() {
-
-	data := Payload{
-		Query: "query {users {id }}",
-	}
-	payloadBytes, err := json.Marshal(data)
+	client := New()
+	err := client.Connect("ws://localhost:4466/")
 	if err != nil {
-		// handle err
+		panic(err)
 	}
-	body := bytes.NewReader(payloadBytes)
 
-	req, err := http.NewRequest("POST", "http://localhost:4466/", body)
-	if err != nil {
-		// handle err
-	}
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("Dnt", "1")
-	req.Header.Set("Origin", "http://localhost:4466")
+	go func() {
+		want := PayloadStruct{
+			Query: "query {users {id }}",
+		}
+		_, err := client.Request(want)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}()
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		// handle err
-	}
-	defer resp.Body.Close()
-
-	//body, _ = ioutil.ReadAll(resp.Body)
-	buf := new(bytes.Buffer)
-	buf.ReadFrom(resp.Body)
-	newStr := buf.String()
-
-	fmt.Printf(newStr)
-	//fmt.Println(string(body))
-
+	defer func() {
+		err = client.Close()
+		if err != nil {
+			panic(err)
+		}
+	}()
 }
