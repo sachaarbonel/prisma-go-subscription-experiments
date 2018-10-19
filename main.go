@@ -71,11 +71,12 @@ func (s *Session) Subscribe(query string) futurePayload {
 
 	s.ws.WriteJSON(&operationMessage{
 		Type:    startMsg,
-		ID:      "test_1",
+		ID:      "test_1", // Do I need to generate a random ID here
 		Payload: json.RawMessage(query),
 	})
 
 	for {
+		//defer close(channel)
 		msg, err := s.ReadOp()
 		if err != nil {
 			s.errChan <- err
@@ -91,6 +92,8 @@ func (s *Session) Subscribe(query string) futurePayload {
 		channel <- strPayload
 
 	}
+
+	return channel
 }
 
 func main() {
@@ -106,6 +109,6 @@ func main() {
 	log.Println(msg.Type)
 
 	query := string(`{"query": "subscription { post { node { id title } } }"}`)
-	session.Subscribe(query)
+	session.Subscribe(query) // goroutine here ??
 
 }
