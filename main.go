@@ -78,8 +78,11 @@ func main() {
 	msg := readOp(c)
 	log.Println(msg.Type)
 	log.Println(msg.ID)
-	postSubscriptionResponse := new(PostSubscriptionResponse)
-	s := json.Unmarshal(msg.Payload, postSubscriptionResponse)
+	//postSubscriptionResponse := new(PostSubscriptionResponse)
+	rawPayload := json.RawMessage(msg.Payload)
+	log.Println(rawPayload)
+	//s := json.Unmarshal(rawPayload, postSubscriptionResponse)
+	s := string(rawPayload[:])
 	log.Println(s)
 	select {}
 
