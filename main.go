@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+type session struct {
+	ws      *websocket.Conn
+	errChan chan error
+}
 
 const (
 	connectionInitMsg      = "connection_init"      // Client -> Server
@@ -30,17 +34,12 @@ type operationMessage struct {
 
 type PostSubscriptionResponse struct {
 	Data struct {
-		Publish struct {
-			ID          string    `json:"id"`
-			CreatedAt   time.Time `json:"createdAt"`
-			UpdatedAt   time.Time `json:"updatedAt"`
-			IsPublished bool      `json:"isPublished"`
-			Title       string    `json:"title"`
-			Content     string    `json:"content"`
-			Author      struct {
-				Name string `json:"name"`
-			} `json:"author"`
-		} `json:"publish"`
+		Post struct {
+			Node struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"node"`
+		} `json:"post"`
 	} `json:"data"`
 }
 
@@ -55,12 +54,6 @@ func wsConnect(url string) *websocket.Conn {
 	return c
 }
 
-func writeRaw(conn *websocket.Conn, msg string) {
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-		panic(err)
-	}
-}
-
 func readOp(conn *websocket.Conn) operationMessage {
 	var msg operationMessage
 	if err := conn.ReadJSON(&msg); err != nil {
@@ -69,13 +62,9 @@ func readOp(conn *websocket.Conn) operationMessage {
 	return msg
 }
 
-func BytesToString(data []byte) string {
-	return string(data[:])
-}
-
 func main() {
 
-	c := wsConnect("ws://localhost:4466/ws")
+	c := wsConnect("ws://localhost:4466")
 	defer c.Close()
 
 	c.WriteJSON(&operationMessage{Type: connectionInitMsg})
@@ -89,7 +78,6 @@ func main() {
 	msg := readOp(c)
 	log.Println(msg.Type)
 	log.Println(msg.ID)
-	//log.Println(string(json.RawMessage(msg.Payload)))
 	postSubscriptionResponse := new(PostSubscriptionResponse)
 	s := json.Unmarshal(msg.Payload, postSubscriptionResponse)
 	log.Println(s)
