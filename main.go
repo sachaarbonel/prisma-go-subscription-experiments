@@ -9,9 +9,11 @@ import (
 )
 
 type Session struct {
-	ws *websocket.Conn
-	//errChan chan error
+	ws      *websocket.Conn
+	errChan chan error
 }
+
+type futurePayload chan string
 
 const (
 	connectionInitMsg      = "connection_init"      // Client -> Server
@@ -54,37 +56,41 @@ func wsConnect(url string) *websocket.Conn {
 	return c
 }
 
-func (s *Session) ReadOp() operationMessage {
+func (s *Session) ReadOp() (operationMessage, error) {
 	var msg operationMessage
-	if err := s.ws.ReadJSON(&msg); err != nil {
-		panic(err)
-	}
-	return msg
+	// if err := s.ws.ReadJSON(&msg); err != nil {
+	// 	panic(err)
+	// }
+	err := s.ws.ReadJSON(&msg)
+	return msg, err
 }
 
-func (s *Session) Subscribe(query string) {
-	// refactor from this
+func (s *Session) Subscribe(query string) futurePayload {
+
+	channel := make(futurePayload)
+
 	s.ws.WriteJSON(&operationMessage{
 		Type:    startMsg,
 		ID:      "test_1",
 		Payload: json.RawMessage(query),
 	})
 
-	// to this. In a function that return chan
-	// example promise := ps.Sub(query)
-	// select {
-	// 	fmt.PrintLn(prosmise.(string))
-	// }
+	for {
+		msg, err := s.ReadOp()
+		if err != nil {
+			s.errChan <- err
+			//TODOD :switch
+		}
 
-	msg := s.ReadOp()
-	log.Println(msg.Type)
-	log.Println(msg.ID)
-	rawPayload := json.RawMessage(msg.Payload)
-	//log.Println(rawPayload)
-	str := string(rawPayload[:])
-	log.Println(str)
-	//select {}
+		log.Println(msg.Type)
+		log.Println(msg.ID)
+		rawPayload := json.RawMessage(msg.Payload)
+		strPayload := string(rawPayload[:])
+		log.Println(strPayload)
 
+		channel <- strPayload
+
+	}
 }
 
 func main() {
@@ -96,10 +102,10 @@ func main() {
 		ws: c,
 	}
 	session.ws.WriteJSON(&operationMessage{Type: connectionInitMsg})
-	log.Println(session.ReadOp().Type)
+	msg, _ := session.ReadOp()
+	log.Println(msg.Type)
 
 	query := string(`{"query": "subscription { post { node { id title } } }"}`)
 	session.Subscribe(query)
-	//select {}
 
 }
