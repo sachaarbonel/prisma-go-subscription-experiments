@@ -1,63 +1,77 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
-	"net/http"
+	"strings"
 
-	websocket "github.com/gorilla/websocket"
+	"github.com/gorilla/websocket"
 )
 
-type PayloadStruct struct {
-	Query string `json:"query"`
+const (
+	connectionInitMsg      = "connection_init"      // Client -> Server
+	connectionTerminateMsg = "connection_terminate" // Client -> Server
+	startMsg               = "start"                // Client -> Server
+	stopMsg                = "stop"                 // Client -> Server
+	connectionAckMsg       = "connection_ack"       // Server -> Client
+	connectionErrorMsg     = "connection_error"     // Server -> Client
+	dataMsg                = "data"                 // Server -> Client
+	errorMsg               = "error"                // Server -> Client
+	completeMsg            = "complete"             // Server -> Client
+	//connectionKeepAliveMsg = "ka"                 // Server -> Client  TODO: keepalives
+)
+
+type operationMessage struct {
+	Payload json.RawMessage `json:"payload,omitempty"`
+	ID      string          `json:"id,omitempty"`
+	Type    string          `json:"type"`
 }
 
-type ResponseStruct struct {
-	Data struct {
-		Users []struct {
-			ID string `json:"id"`
-		} `json:"users"`
-	} `json:"data"`
-}
-
-type WSClient struct {
-	conn *websocket.Conn
-}
-
-func New() *WSClient {
-	return &WSClient{}
-}
-
-func (c *WSClient) Connect(url string) error {
-
-	//do better than strings
-	headers := http.Header{
-		"Host":                     []string{"localhost:4466"},
-		"User-Agent":               []string{"Mozilla/5.0 (X11; Linux x86_64; rv:62.0) Gecko/20100101 Firefox/62.0"},
-		"Accept":                   []string{"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
-		"Accept-Language":          []string{"en-US,en;q=0.5"},
-		"Accept-Encoding":          []string{"gzip, deflate"},
-		"Sec-WebSocket-Version":    []string{"13"},
-		"Origin":                   []string{"http://localhost:4466"},
-		"Sec-WebSocket-Protocol":   []string{"graphql-ws"},
-		"Sec-WebSocket-Extensions": []string{"permessage-deflate"},
-		"Sec-WebSocket-Key":        []string{"/U1W39A3aqbOjTV7yFUyhg=="},
-		"Pragma":                   []string{"no-cache"},
-		"Cache-Control":            []string{"no-cache"},
-	}
-	conn, _, err := websocket.DefaultDialer.Dial(url, headers)
+func wsConnect(url string) *websocket.Conn {
+	c, _, err := websocket.DefaultDialer.Dial(strings.Replace(url, "http://", "ws://", -1), nil)
 	if err != nil {
-		return err
+		panic(err)
 	}
-	c.conn = conn
-	//go c.read()
-	return nil
+	return c
+}
+
+func writeRaw(conn *websocket.Conn, msg string) {
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
+		panic(err)
+	}
+}
+
+func readOp(conn *websocket.Conn) operationMessage {
+	var msg operationMessage
+	if err := conn.ReadJSON(&msg); err != nil {
+		panic(err)
+	}
+	return msg
 }
 
 func main() {
-	client := New()
-	err := client.Connect("ws://localhost:4466")
-	if err != nil {
-		log.Println(err)
-	}
+
+	c := wsConnect("http://localhost:4466/")
+	defer c.Close()
+
+	c.WriteJSON(&operationMessage{Type: connectionInitMsg})
+	log.Println(readOp(c).Type)
+	c.WriteJSON(&operationMessage{
+		Type: startMsg,
+		ID:   "test_1",
+		Payload: json.RawMessage(`{"query": "subscription {
+			post {
+			  node {
+				id
+				title
+			  }
+			}
+		  }"}`),
+	})
+
+	msg := readOp(c)
+	log.Println(msg.Type)
+	log.Println(msg.ID)
+	log.Println(string(msg.Payload))
 
 }
