@@ -8,9 +8,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type session struct {
-	ws      *websocket.Conn
-	errChan chan error
+type Session struct {
+	ws *websocket.Conn
+	//errChan chan error
 }
 
 const (
@@ -54,12 +54,37 @@ func wsConnect(url string) *websocket.Conn {
 	return c
 }
 
-func readOp(conn *websocket.Conn) operationMessage {
+func (s *Session) ReadOp() operationMessage {
 	var msg operationMessage
-	if err := conn.ReadJSON(&msg); err != nil {
+	if err := s.ws.ReadJSON(&msg); err != nil {
 		panic(err)
 	}
 	return msg
+}
+
+func (s *Session) Subscribe(query string) {
+	// refactor from this
+	s.ws.WriteJSON(&operationMessage{
+		Type:    startMsg,
+		ID:      "test_1",
+		Payload: json.RawMessage(query),
+	})
+
+	// to this. In a function that return chan
+	// example promise := ps.Sub(query)
+	// select {
+	// 	fmt.PrintLn(prosmise.(string))
+	// }
+
+	msg := s.ReadOp()
+	log.Println(msg.Type)
+	log.Println(msg.ID)
+	rawPayload := json.RawMessage(msg.Payload)
+	//log.Println(rawPayload)
+	str := string(rawPayload[:])
+	log.Println(str)
+	//select {}
+
 }
 
 func main() {
@@ -67,23 +92,14 @@ func main() {
 	c := wsConnect("ws://localhost:4466")
 	defer c.Close()
 
-	c.WriteJSON(&operationMessage{Type: connectionInitMsg})
-	log.Println(readOp(c).Type)
-	c.WriteJSON(&operationMessage{
-		Type:    startMsg,
-		ID:      "test_1",
-		Payload: json.RawMessage(`{"query": "subscription { post { node { id title } } }"}`),
-	})
+	session := &Session{
+		ws: c,
+	}
+	session.ws.WriteJSON(&operationMessage{Type: connectionInitMsg})
+	log.Println(session.ReadOp().Type)
 
-	msg := readOp(c)
-	log.Println(msg.Type)
-	log.Println(msg.ID)
-	//postSubscriptionResponse := new(PostSubscriptionResponse)
-	rawPayload := json.RawMessage(msg.Payload)
-	log.Println(rawPayload)
-	//s := json.Unmarshal(rawPayload, postSubscriptionResponse)
-	s := string(rawPayload[:])
-	log.Println(s)
-	select {}
+	query := string(`{"query": "subscription { post { node { id title } } }"}`)
+	session.Subscribe(query)
+	//select {}
 
 }
