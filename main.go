@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -12,8 +13,6 @@ type Session struct {
 	ws      *websocket.Conn
 	errChan chan error
 }
-
-type futurePayload chan string
 
 const (
 	connectionInitMsg      = "connection_init"      // Client -> Server
@@ -58,16 +57,16 @@ func wsConnect(url string) *websocket.Conn {
 
 func (s *Session) ReadOp() (operationMessage, error) {
 	var msg operationMessage
-	// if err := s.ws.ReadJSON(&msg); err != nil {
-	// 	panic(err)
-	// }
 	err := s.ws.ReadJSON(&msg)
+	if err != nil {
+		panic(err)
+	}
 	return msg, err
 }
 
-func (s *Session) Subscribe(query string) futurePayload {
+func (s *Session) Subscribe(query string) (<-chan string, <-chan error) {
 
-	channel := make(futurePayload)
+	channel := make(chan string)
 
 	s.ws.WriteJSON(&operationMessage{
 		Type:    startMsg,
@@ -75,25 +74,23 @@ func (s *Session) Subscribe(query string) futurePayload {
 		Payload: json.RawMessage(query),
 	})
 
-	for {
-		//defer close(channel)
-		msg, err := s.ReadOp()
-		if err != nil {
-			s.errChan <- err
-			//TODOD :switch
+	go func() {
+		for {
+
+			msg, err := s.ReadOp()
+			if err != nil {
+				s.errChan <- err
+			}
+			rawPayload := json.RawMessage(msg.Payload)
+			strPayload := string(rawPayload[:])
+			channel <- strPayload
+
 		}
+		close(channel)
+		close(s.errChan)
+	}()
 
-		log.Println(msg.Type)
-		log.Println(msg.ID)
-		rawPayload := json.RawMessage(msg.Payload)
-		strPayload := string(rawPayload[:])
-		log.Println(strPayload)
-
-		channel <- strPayload
-
-	}
-
-	return channel
+	return channel, s.errChan
 }
 
 func main() {
@@ -109,6 +106,9 @@ func main() {
 	log.Println(msg.Type)
 
 	query := string(`{"query": "subscription { post { node { id title } } }"}`)
-	session.Subscribe(query) // goroutine here ??
+	subscription_future, _ := session.Subscribe(query)
+	for subscription := range subscription_future {
+		fmt.Println(subscription)
+	}
 
 }
